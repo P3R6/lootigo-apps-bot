@@ -1,48 +1,22 @@
-name: Source Probe
+name: Dry Run
 
 on:
   workflow_dispatch:
 
 jobs:
-  probe:
+  dry:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Probe candidate Android sources
-        run: |
-          python - <<'PY'
-          import re, urllib.request
-          UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
-          RUA = "Mozilla/5.0 (compatible; LootigoAppsBot/1.0 by /u/P3R6)"
-
-          def probe(name, url, ua=UA):
-              try:
-                  r = urllib.request.Request(url, headers={"User-Agent": ua,
-                                                           "Accept-Language": "en-US,en"})
-                  with urllib.request.urlopen(r, timeout=25) as x:
-                      b = x.read().decode("utf-8", "replace")
-              except Exception as e:
-                  print(f"[ X ] {name:<34} {getattr(e,'code',type(e).__name__)}")
-                  return
-              pkgs = sorted(set(re.findall(
-                  r'play\.google\.com/store/apps/details\?id=([a-zA-Z0-9_.]+)', b)))
-              entries = b.count("<entry") + b.count("<item")
-              print(f"[ OK] {name:<34} {len(b)//1024:>4}KB  posts={entries:<3} pkgs={len(pkgs)}")
-              for p in pkgs[:5]:
-                  print(f"        {p}")
-
-          print("=== Reddit ===")
-          probe("r/googleplaydeals", "https://www.reddit.com/r/googleplaydeals/new/.rss", RUA)
-          probe("r/AppHookup",       "https://www.reddit.com/r/AppHookup/new/.rss", RUA)
-
-          print("\n=== Trackers ===")
-          probe("AppBrain hot sales",  "https://www.appbrain.com/apps/hot-sales/")
-          probe("AppSales web",        "https://appsales.io/")
-          probe("appsmenow free",      "https://appsmenow.com/price-drops/free")
-
-          print("\n=== Play Store itself ===")
-          probe("Play top charts",     "https://play.google.com/store/apps/top")
-          probe("Play app page",       "https://play.google.com/store/apps/details?id=com.whatsapp&hl=en&gl=US")
-          PY
+      - run: pip install requests
+      - name: Dry run (nothing is posted)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          DRY_RUN: "1"
+          IOS_ENABLED: "0"
+          ANDROID_ENABLED: "1"
+        run: python main.py

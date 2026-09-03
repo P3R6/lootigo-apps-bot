@@ -2,6 +2,7 @@
 
 Run:  python -m unittest -v test_main
 """
+import json
 import os
 import pathlib
 import sys
@@ -182,14 +183,14 @@ class TestCollect(unittest.TestCase):
     def test_keeps_only_fresh_free_non_games(self):
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", self._fake_get()):
-            apps = main.collect(set())
+            apps = main.collect_ios(set())
         titles = [a["title"] for a in apps]
         self.assertEqual(titles, ["Good App"])
 
     def test_price_line_shows_the_drop(self):
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", self._fake_get()):
-            app = main.collect(set())[0]
+            app = main.collect_ios(set())[0]
         self.assertEqual(app["price"], "$9.99 → Free")
         self.assertIn("apps.apple.com", app["url"])
         self.assertTrue(app["image"].startswith("https://"))
@@ -199,7 +200,7 @@ class TestCollect(unittest.TestCase):
         seen = set()
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", self._fake_get(drop="40 d ago")):
-            apps = main.collect(seen)
+            apps = main.collect_ios(seen)
         self.assertEqual(apps, [])
         self.assertIn("111", seen, "a stale app should not be re-checked every run")
 
@@ -210,20 +211,20 @@ class TestCollect(unittest.TestCase):
         """
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", self._fake_get(drop="06/06/2026")):
-            apps = main.collect(set())
+            apps = main.collect_ios(set())
         self.assertEqual([a["title"] for a in apps], ["Good App"])
 
     def test_seed_date_is_never_shown_to_readers(self):
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", self._fake_get(drop="06/06/2026")):
-            app = main.collect(set())[0]
+            app = main.collect_ios(set())[0]
         self.assertNotIn("06/06/2026", app["ends"])
         self.assertIn("Limited time", app["ends"])
 
     def test_real_drop_time_is_shown(self):
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", self._fake_get(drop="6 h ago")):
-            app = main.collect(set())[0]
+            app = main.collect_ios(set())[0]
         self.assertIn("Free since 6 h ago", app["ends"])
 
     def test_seen_apps_are_not_fetched_again(self):
@@ -236,7 +237,7 @@ class TestCollect(unittest.TestCase):
 
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", counting_get):
-            apps = main.collect({"111", "222", "333"})
+            apps = main.collect_ios({"111", "222", "333"})
         self.assertEqual(apps, [])
         self.assertFalse([u for u in calls if "/en/app/" in u],
                          "detail pages must not be fetched for known apps")
@@ -245,7 +246,7 @@ class TestCollect(unittest.TestCase):
         with patch.object(main, "PAGES", 1), \
              patch.object(main, "MAX_POSTS_PER_RUN", 0), \
              patch.object(main.requests, "get", self._fake_get()):
-            self.assertEqual(main.collect(set()), [])
+            self.assertEqual(main.collect_ios(set()), [])
 
     def test_listing_failure_does_not_crash(self):
         def boom(url, **kwargs):
@@ -253,7 +254,7 @@ class TestCollect(unittest.TestCase):
 
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", boom):
-            self.assertEqual(main.collect(set()), [])
+            self.assertEqual(main.collect_ios(set()), [])
 
 
 class TestSeenFile(unittest.TestCase):
@@ -272,3 +273,151 @@ class TestSeenFile(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# ------------------------------------------------------------- Android side
+
+REDDIT_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>[Game] Samorost 3 ($4.99 -&gt; Free)</title>
+    <content type="html">&lt;a href="https://play.google.com/store/apps/details?id=amanita.samorost3"&gt;link&lt;/a&gt;</content>
+  </entry>
+  <entry>
+    <title>Notes Pro (was $3.99, now free)</title>
+    <content type="html">&lt;a href="https://play.google.com/store/apps/details?id=com.notes.pro&amp;hl=en"&gt;link&lt;/a&gt;</content>
+  </entry>
+  <entry>
+    <title>Still Paid Utility ($2.99)</title>
+    <content type="html">&lt;a href="https://play.google.com/store/apps/details?id=com.still.paid"&gt;link&lt;/a&gt;</content>
+  </entry>
+  <entry>
+    <title>Duplicate of Notes Pro</title>
+    <content type="html">&lt;a href="https://play.google.com/store/apps/details?id=com.notes.pro"&gt;link&lt;/a&gt;</content>
+  </entry>
+  <entry>
+    <title>A post with no store link at all</title>
+    <content type="html">&lt;p&gt;nothing here&lt;/p&gt;</content>
+  </entry>
+</feed>"""
+
+PLAY_RECORDS = {
+    "amanita.samorost3": {"name": "Samorost 3", "applicationCategory": "GAME_ADVENTURE",
+                          "image": "https://play-lh/samorost.png", "description": "Adventure.",
+                          "offers": [{"price": "0"}]},
+    "com.notes.pro": {"name": "Notes Pro", "applicationCategory": "PRODUCTIVITY",
+                      "image": "https://play-lh/notes.png", "description": "Take notes.",
+                      "offers": [{"price": "0"}]},
+    "com.still.paid": {"name": "Still Paid Utility", "applicationCategory": "TOOLS",
+                       "image": "https://play-lh/paid.png", "description": "Tool.",
+                       "offers": [{"price": "2.99"}]},
+}
+
+
+def _play_page(pkg):
+    payload = dict(PLAY_RECORDS[pkg])
+    payload["@type"] = "SoftwareApplication"
+    return ('<html><head><script type="application/ld+json">'
+            + json.dumps(payload) + "</script></head></html>")
+
+
+class TestRedditParsing(unittest.TestCase):
+    def setUp(self):
+        self.found = main.parse_reddit_packages(REDDIT_XML)
+        self.pkgs = [f["pkg"] for f in self.found]
+
+    def test_extracts_packages(self):
+        self.assertIn("com.notes.pro", self.pkgs)
+        self.assertIn("amanita.samorost3", self.pkgs)
+
+    def test_strips_query_noise(self):
+        """?id=com.notes.pro&hl=en must not become 'com.notes.pro&hl=en'."""
+        self.assertIn("com.notes.pro", self.pkgs)
+        self.assertFalse([p for p in self.pkgs if "&" in p or "hl=" in p])
+
+    def test_deduplicates(self):
+        self.assertEqual(len(self.pkgs), len(set(self.pkgs)))
+
+    def test_ignores_posts_without_a_link(self):
+        self.assertEqual(len(self.pkgs), 3)
+
+    def test_keeps_the_post_title_for_the_price(self):
+        notes = [f for f in self.found if f["pkg"] == "com.notes.pro"][0]
+        self.assertIn("$3.99", notes["title"])
+
+    def test_broken_feed_is_safe(self):
+        self.assertEqual(main.parse_reddit_packages("<<<"), [])
+
+
+class TestCollectAndroid(unittest.TestCase):
+    def _fake_get(self, reddit_fails=False):
+        def get(url, **kwargs):
+            class Response:
+                def __init__(self, text="", ok=True):
+                    self.text = text
+                    self.ok = ok
+
+                def raise_for_status(self):
+                    pass
+
+            if "reddit.com" in url:
+                if reddit_fails:
+                    raise RuntimeError("429 Too Many Requests")
+                return Response(REDDIT_XML)
+            pkg = url.split("id=", 1)[1].split("&")[0]
+            if pkg not in PLAY_RECORDS:
+                raise RuntimeError("404")
+            return Response(_play_page(pkg))
+
+        return get
+
+    def test_keeps_only_free_non_games(self):
+        with patch.object(main.requests, "get", self._fake_get()):
+            apps = main.collect_android(set())
+        self.assertEqual([a["title"] for a in apps], ["Notes Pro"])
+
+    def test_game_is_dropped_by_category(self):
+        with patch.object(main.requests, "get", self._fake_get()):
+            apps = main.collect_android(set())
+        self.assertNotIn("Samorost 3", [a["title"] for a in apps])
+
+    def test_android_fields(self):
+        with patch.object(main.requests, "get", self._fake_get()):
+            app = main.collect_android(set())[0]
+        self.assertEqual(app["platform"], "Android")
+        self.assertEqual(app["store"], "android")
+        self.assertEqual(app["tag"], "Productivity")
+        self.assertEqual(app["price"], "$3.99 → Free")
+        self.assertIn("play.google.com", app["url"])
+        self.assertTrue(app["image"].startswith("https://"))
+
+    def test_android_gets_play_instructions(self):
+        with patch.object(main.requests, "get", self._fake_get()):
+            app = main.collect_android(set())[0]
+        self.assertIn("Google Play page", main.build_caption(app))
+        self.assertIn("Google account", main.build_caption(app))
+
+    def test_seen_packages_are_skipped(self):
+        with patch.object(main.requests, "get", self._fake_get()):
+            apps = main.collect_android({"com.notes.pro", "amanita.samorost3",
+                                         "com.still.paid"})
+        self.assertEqual(apps, [])
+
+    def test_reddit_outage_is_not_fatal(self):
+        """Reddit 429s from GitHub's shared runner IPs — that must not break the run."""
+        with patch.object(main.requests, "get", self._fake_get(reddit_fails=True)):
+            self.assertEqual(main.collect_android(set()), [])
+
+    def test_lookup_budget_is_respected(self):
+        with patch.object(main, "MAX_LOOKUPS_PER_RUN", 1), \
+             patch.object(main.requests, "get", self._fake_get()):
+            apps = main.collect_android(set())
+        self.assertEqual(apps, [], "first candidate is a game, budget stops there")
+
+
+class TestTagFromBothStores(unittest.TestCase):
+    def test_apple_and_google_agree(self):
+        self.assertEqual(main.tag_from_genre("Health & Fitness"), "HealthAndFitness")
+        self.assertEqual(main.tag_from_genre("HEALTH_AND_FITNESS"), "HealthAndFitness")
+        self.assertEqual(main.tag_from_genre("HOUSE_AND_HOME"), "HouseAndHome")
+        self.assertEqual(main.tag_from_genre("PRODUCTIVITY"), "Productivity")
