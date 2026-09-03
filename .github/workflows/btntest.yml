@@ -1,0 +1,48 @@
+name: Button Style Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Ask Telegram what it does with style fields
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json, os, requests
+          T = os.environ["TELEGRAM_BOT_TOKEN"]
+          API = f"https://api.telegram.org/bot{T}"
+          ADMIN = 5237328828
+
+          markup = {"inline_keyboard": [[{
+              "text": "Claim Now",
+              "url": "https://example.com",
+              "style": "danger",
+              "color": "red",
+              "button_color": "#FF0000",
+          }]]}
+          r = requests.post(f"{API}/sendMessage", data={
+              "chat_id": ADMIN,
+              "text": "button style probe - deleted in a second",
+              "reply_markup": json.dumps(markup),
+          }, timeout=20).json()
+
+          print("accepted:", r.get("ok"))
+          if not r.get("ok"):
+              print("error:", r.get("description"))
+          else:
+              btn = r["result"]["reply_markup"]["inline_keyboard"][0][0]
+              print("fields Telegram echoed back:", sorted(btn.keys()))
+              for f in ("style", "color", "button_color"):
+                  print(f"  {f}: {'KEPT' if f in btn else 'DROPPED'}")
+              requests.post(f"{API}/deleteMessage", data={
+                  "chat_id": ADMIN, "message_id": r["result"]["message_id"]}, timeout=20)
+              print("probe message deleted")
+          PY
