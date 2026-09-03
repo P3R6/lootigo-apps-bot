@@ -530,3 +530,41 @@ class TestIosMustBeARealDrop(unittest.TestCase):
         with patch.object(main, "PAGES", 1), \
              patch.object(main.requests, "get", self._get):
             self.assertEqual(main.collect_ios(set()), [])
+
+
+class TestButtonStyle(unittest.TestCase):
+    """Telegram validates the style field: only four values are accepted.
+
+    Probed live against the API — 'red', 'warning', 'secondary', 'attention'
+    and the rest are rejected with "Invalid button style specified".
+    """
+
+    def test_only_the_four_known_values(self):
+        self.assertEqual(main.BUTTON_STYLES,
+                         ("success", "danger", "primary", "default"))
+
+    def test_apps_default_to_danger_not_the_games_green(self):
+        self.assertEqual(main.BUTTON_STYLE, "danger")
+
+    def test_style_is_attached_to_the_button(self):
+        app = {"id": "1", "title": "T", "description": "d", "platform": "Android",
+               "tag": "Tools", "price": "$1 → Free", "ends": "soon",
+               "image": "https://x/i.png", "url": "https://x", "store": "android"}
+        captured = {}
+
+        class Response:
+            ok = True
+            status_code = 200
+            text = ""
+
+        def fake_post(url, data=None, **kwargs):
+            captured.update(data or {})
+            return Response()
+
+        with patch.object(main, "DRY_RUN", False), \
+             patch.object(main.requests, "post", fake_post):
+            main.send_photo(app)
+
+        button = json.loads(captured["reply_markup"])["inline_keyboard"][0][0]
+        self.assertEqual(button["style"], "danger")
+        self.assertEqual(button["url"], "https://x")

@@ -85,6 +85,15 @@ EMOJI_HOW = pe("5318986077455795572", "📌")
 
 MAX_CAPTION = 1024
 
+# Telegram validates this field and accepts only these four values — anything
+# else is rejected with "Invalid button style specified". The colour itself is
+# painted by the client, so this is the only control there is.
+# The games bot uses "success" (green); apps use "danger" to tell them apart.
+BUTTON_STYLES = ("success", "danger", "primary", "default")
+BUTTON_STYLE = os.environ.get("BUTTON_STYLE", "danger")
+if BUTTON_STYLE not in BUTTON_STYLES:
+    raise SystemExit(f"BUTTON_STYLE must be one of {BUTTON_STYLES}, got {BUTTON_STYLE!r}")
+
 HOW_TO_CLAIM = {
     "ios": (
         "1. Tap the button to open the App Store page.\n"
@@ -465,7 +474,7 @@ def send_photo(app):
         "parse_mode": "HTML",
         "reply_markup": json.dumps({
             "inline_keyboard": [[
-                {"text": "✅ Claim Now", "url": app["url"]}
+                {"text": "✅ Claim Now", "url": app["url"], "style": BUTTON_STYLE}
             ]]
         }),
     }
