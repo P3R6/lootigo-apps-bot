@@ -111,6 +111,9 @@ def tag_from_genre(genre):
     return "".join(w.capitalize() for w in words if w) or "App"
 
 
+PRICE_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d{2})?")
+
+
 def truncate(text, max_len):
     if len(text) <= max_len:
         return text
@@ -267,6 +270,12 @@ def collect_ios(seen):
 
         genre = info.get("primaryGenreName") or card["genre"]
         price = detail["price_old"]
+        if not price:
+            # Same rule as Android: no original price, no proof it is a drop.
+            print(f"    {card['title']}: no original price, not a drop")
+            seen.add(card["id"])
+            continue
+
         apps.append({
             "id": card["id"],
             "store": "ios",
@@ -274,7 +283,7 @@ def collect_ios(seen):
             "description": clean(info.get("description") or "", 600),
             "platform": "iOS, iPadOS",
             "tag": tag_from_genre(genre),
-            "price": f"{price} → Free" if price else "Free",
+            "price": f"{price} → Free",
             "ends": (
                 f"Free since {detail['dropped_text']} — can end any time"
                 if detail["age_is_reliable"] else "Limited time — grab it now"
@@ -388,11 +397,19 @@ def collect_android(seen):
             print(f"    {info['name'] or card['pkg']}: no longer free")
             continue
 
-        # Reddit titles usually carry the old price: "(was $4.99)" / "$4.99 -> Free"
+        # The old price only ever appears in the Reddit title:
+        # "(was $4.99)" / "$4.99 -> Free". Google's page shows today's price
+        # only, so without that number there is no evidence this was ever paid.
         old_price = ""
-        money = re.search(r"\$\s?\d[\d,]*(?:\.\d{2})?", card["title"])
+        money = PRICE_RE.search(card["title"])
         if money:
             old_price = money.group(0).replace(" ", "")
+
+        if not old_price:
+            # An app that was already free is not a deal — do not post it.
+            print(f"    {info['name'] or card['pkg']}: no original price, not a drop")
+            seen.add(card["pkg"])
+            continue
 
         apps.append({
             "id": card["pkg"],
@@ -401,7 +418,7 @@ def collect_android(seen):
             "description": info["description"],
             "platform": "Android",
             "tag": tag_from_genre(info["category"]),
-            "price": f"{old_price} → Free" if old_price else "Free",
+            "price": f"{old_price} → Free",
             "ends": "Limited time — grab it now",
             "image": info["image"],
             "url": f"https://play.google.com/store/apps/details?id={card['pkg']}",

@@ -421,3 +421,112 @@ class TestTagFromBothStores(unittest.TestCase):
         self.assertEqual(main.tag_from_genre("HEALTH_AND_FITNESS"), "HealthAndFitness")
         self.assertEqual(main.tag_from_genre("HOUSE_AND_HOME"), "HouseAndHome")
         self.assertEqual(main.tag_from_genre("PRODUCTIVITY"), "Productivity")
+
+
+class TestMustBeARealDrop(unittest.TestCase):
+    """An app that was already free is not a deal.
+
+    The first live Android run posted "Easy Phone Senior Dialer" with
+    "Price: Free" — nothing proved it had ever cost anything. Google's page
+    only reports today's price, so the Reddit title is the sole evidence.
+    No stated original price means no post.
+    """
+
+    NO_PRICE_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Easy Phone Senior Dialer - great free app for seniors</title>
+    <content type="html">&lt;a href="https://play.google.com/store/apps/details?id=com.always.free"&gt;link&lt;/a&gt;</content>
+  </entry>
+  <entry>
+    <title>Notes Pro (was $3.99, now free)</title>
+    <content type="html">&lt;a href="https://play.google.com/store/apps/details?id=com.notes.pro"&gt;link&lt;/a&gt;</content>
+  </entry>
+</feed>"""
+
+    RECORDS = {
+        "com.always.free": {"name": "Easy Phone Senior Dialer",
+                            "applicationCategory": "COMMUNICATION",
+                            "image": "https://play-lh/dialer.png",
+                            "description": "Large buttons.", "offers": [{"price": "0"}]},
+        "com.notes.pro": {"name": "Notes Pro", "applicationCategory": "PRODUCTIVITY",
+                          "image": "https://play-lh/notes.png",
+                          "description": "Take notes.", "offers": [{"price": "0"}]},
+    }
+
+    def _get(self, url, **kwargs):
+        class Response:
+            def __init__(self, text):
+                self.text = text
+                self.ok = True
+
+            def raise_for_status(self):
+                pass
+
+        if "reddit.com" in url:
+            return Response(self.NO_PRICE_XML)
+        pkg = url.split("id=", 1)[1].split("&")[0]
+        payload = dict(self.RECORDS[pkg])
+        payload["@type"] = "SoftwareApplication"
+        return Response('<script type="application/ld+json">'
+                        + json.dumps(payload) + "</script>")
+
+    def test_always_free_app_is_not_posted(self):
+        with patch.object(main.requests, "get", self._get):
+            apps = main.collect_android(set())
+        self.assertEqual([a["title"] for a in apps], ["Notes Pro"])
+
+    def test_it_is_remembered_so_it_is_not_rechecked(self):
+        seen = set()
+        with patch.object(main.requests, "get", self._get):
+            main.collect_android(seen)
+        self.assertIn("com.always.free", seen)
+
+    def test_price_line_always_shows_a_drop(self):
+        with patch.object(main.requests, "get", self._get):
+            app = main.collect_android(set())[0]
+        self.assertEqual(app["price"], "$3.99 → Free")
+        self.assertNotEqual(app["price"], "Free")
+
+
+class TestIosMustBeARealDrop(unittest.TestCase):
+    """Same rule on the Apple side."""
+
+    LISTING = (
+        '<article class="app-card">'
+        '<a href="https://appstore-discounts.com/en/app/777">'
+        '<img src="https://img/777.jpg">'
+        '<h3 class="app-card-title">Always Free App</h3>'
+        '<span class="genre">Utilities</span></article>'
+    )
+    ITUNES = {"777": {"trackName": "Always Free App", "primaryGenreName": "Utilities",
+                      "price": 0.0, "description": "Free forever.",
+                      "artworkUrl512": "https://is1/x.jpg",
+                      "trackViewUrl": "https://apps.apple.com/us/app/x/id777"}}
+
+    def _get(self, url, **kwargs):
+        class Response:
+            def __init__(self, text="", payload=None):
+                self.text = text
+                self._payload = payload
+                self.ok = True
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return self._payload
+
+        if "/en/free" in url:
+            page = url.rsplit("p=", 1)[-1]
+            return Response(self.LISTING if page == "1" else "")
+        if "/en/app/" in url:
+            # detail page with a drop time but no price-old element
+            return Response('<p class="drop-relative">Drop detected 6 h ago</p>')
+        app_id = url.rsplit("id=", 1)[-1]
+        return Response(payload={"results": [self.ITUNES[app_id]]})
+
+    def test_no_original_price_means_no_post(self):
+        with patch.object(main, "PAGES", 1), \
+             patch.object(main.requests, "get", self._get):
+            self.assertEqual(main.collect_ios(set()), [])
