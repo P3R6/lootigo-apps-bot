@@ -11,33 +11,50 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests
-      - name: Send a style comparison to the admin
+      - name: Find which button styles Telegram accepts
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           python - <<'PY'
-          import json, os, requests
+          import json, os, time, requests
           T = os.environ["TELEGRAM_BOT_TOKEN"]
           API = f"https://api.telegram.org/bot{T}"
           ADMIN = 5237328828
 
-          styles = ["success", "danger", "primary", "secondary", "warning", "attention"]
-          rows = [[{"text": f"Claim Now  ({s})",
-                    "url": "https://example.com", "style": s}] for s in styles]
-          rows.append([{"text": "Claim Now  (no style)", "url": "https://example.com"}])
+          CANDIDATES = [
+              "success", "danger", "primary", "secondary", "warning",
+              "attention", "destructive", "default", "info", "link",
+              "positive", "negative", "accent", "green", "red", "blue",
+          ]
 
-          r = requests.post(f"{API}/sendMessage", data={
-              "chat_id": ADMIN,
-              "text": ("Button style comparison.\n"
-                       "Tell Claude which one looks right for the apps channel."),
-              "reply_markup": json.dumps({"inline_keyboard": rows}),
-          }, timeout=20).json()
+          valid = []
+          for s in CANDIDATES:
+              markup = {"inline_keyboard": [[
+                  {"text": "x", "url": "https://example.com", "style": s}]]}
+              r = requests.post(f"{API}/sendMessage", data={
+                  "chat_id": ADMIN, "text": f"probe {s}",
+                  "reply_markup": json.dumps(markup)}, timeout=20).json()
+              if r.get("ok"):
+                  valid.append(s)
+                  print(f"  VALID    {s}")
+                  requests.post(f"{API}/deleteMessage", data={
+                      "chat_id": ADMIN,
+                      "message_id": r["result"]["message_id"]}, timeout=20)
+              else:
+                  print(f"  rejected {s}")
+              time.sleep(0.4)
 
-          print("accepted:", r.get("ok"))
-          if not r.get("ok"):
-              print("error:", r.get("description"))
-          else:
-              for row in r["result"]["reply_markup"]["inline_keyboard"]:
-                  b = row[0]
-                  print(f"  {b['text']:<28} style echoed: {b.get('style', 'NONE')}")
+          print("\nACCEPTED STYLES:", valid)
+
+          # Show the valid ones side by side so the colours can be compared
+          if valid:
+              rows = [[{"text": f"Claim Now  ({s})", "url": "https://example.com",
+                        "style": s}] for s in valid]
+              rows.append([{"text": "Claim Now  (no style)",
+                            "url": "https://example.com"}])
+              r = requests.post(f"{API}/sendMessage", data={
+                  "chat_id": ADMIN,
+                  "text": "Button styles Telegram accepts - which colour do you want for the apps channel?",
+                  "reply_markup": json.dumps({"inline_keyboard": rows})}, timeout=20).json()
+              print("comparison sent:", r.get("ok"), r.get("description", ""))
           PY
