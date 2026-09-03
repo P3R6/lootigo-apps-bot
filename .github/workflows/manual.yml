@@ -1,0 +1,64 @@
+name: Manual Run
+
+# A hand-fired run with knobs, for testing.
+# Defaults to a dry run so an accidental click never posts to the channel.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (print only, post nothing)"
+        type: choice
+        options: ["true", "false"]
+        default: "true"
+      ios:
+        description: "Collect iOS apps"
+        type: choice
+        options: ["1", "0"]
+        default: "1"
+      android:
+        description: "Collect Android apps"
+        type: choice
+        options: ["1", "0"]
+        default: "1"
+      max_posts:
+        description: "How many posts at most"
+        default: "2"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: free-apps-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Run bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          DRY_RUN:            ${{ inputs.dry_run == 'true' && '1' || '0' }}
+          IOS_ENABLED:        ${{ inputs.ios }}
+          ANDROID_ENABLED:    ${{ inputs.android }}
+          MAX_POSTS_PER_RUN:  ${{ inputs.max_posts }}
+        run: python main.py
+      - name: Save seen IDs to repo
+        if: inputs.dry_run == 'false'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_ids.json
+          git diff --staged --quiet && echo "No changes" && exit 0
+          git commit -m "chore: update seen_ids [skip ci]"
+          git pull --rebase origin main
+          git push
