@@ -11,7 +11,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests
-      - name: Ask Telegram what it does with style fields
+      - name: Send a style comparison to the admin
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
@@ -21,28 +21,23 @@ jobs:
           API = f"https://api.telegram.org/bot{T}"
           ADMIN = 5237328828
 
-          markup = {"inline_keyboard": [[{
-              "text": "Claim Now",
-              "url": "https://example.com",
-              "style": "danger",
-              "color": "red",
-              "button_color": "#FF0000",
-          }]]}
+          styles = ["success", "danger", "primary", "secondary", "warning", "attention"]
+          rows = [[{"text": f"Claim Now  ({s})",
+                    "url": "https://example.com", "style": s}] for s in styles]
+          rows.append([{"text": "Claim Now  (no style)", "url": "https://example.com"}])
+
           r = requests.post(f"{API}/sendMessage", data={
               "chat_id": ADMIN,
-              "text": "button style probe - deleted in a second",
-              "reply_markup": json.dumps(markup),
+              "text": ("Button style comparison.\n"
+                       "Tell Claude which one looks right for the apps channel."),
+              "reply_markup": json.dumps({"inline_keyboard": rows}),
           }, timeout=20).json()
 
           print("accepted:", r.get("ok"))
           if not r.get("ok"):
               print("error:", r.get("description"))
           else:
-              btn = r["result"]["reply_markup"]["inline_keyboard"][0][0]
-              print("fields Telegram echoed back:", sorted(btn.keys()))
-              for f in ("style", "color", "button_color"):
-                  print(f"  {f}: {'KEPT' if f in btn else 'DROPPED'}")
-              requests.post(f"{API}/deleteMessage", data={
-                  "chat_id": ADMIN, "message_id": r["result"]["message_id"]}, timeout=20)
-              print("probe message deleted")
+              for row in r["result"]["reply_markup"]["inline_keyboard"]:
+                  b = row[0]
+                  print(f"  {b['text']:<28} style echoed: {b.get('style', 'NONE')}")
           PY
