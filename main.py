@@ -50,7 +50,10 @@ DRY_RUN = os.environ.get("DRY_RUN", "0") == "1"
 PAGES = int(os.environ.get("PAGES", "2"))
 MAX_AGE_HOURS = int(os.environ.get("MAX_AGE_HOURS", "48"))
 MAX_POSTS_PER_RUN = int(os.environ.get("MAX_POSTS_PER_RUN", "8"))
-MAX_LOOKUPS_PER_RUN = int(os.environ.get("MAX_LOOKUPS_PER_RUN", "12"))
+# r/googleplaydeals is roughly 90% games, so most lookups end in a rejection.
+# The budget has to cover the whole candidate list or the few real apps
+# never get reached. Each lookup is one ~1MB page, which is nothing on a runner.
+MAX_LOOKUPS_PER_RUN = int(os.environ.get("MAX_LOOKUPS_PER_RUN", "30"))
 POST_DELAY = int(os.environ.get("POST_DELAY", "30"))
 
 HEADERS = {

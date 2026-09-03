@@ -17,6 +17,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           DRY_RUN: "1"
+          MAX_POSTS_PER_RUN: "12"
           IOS_ENABLED: "0"
           ANDROID_ENABLED: "1"
         run: python main.py
